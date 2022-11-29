@@ -108,6 +108,7 @@ func downloadBlob(imagePath string, hash digest.Digest, size int64, path string)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	log.Infof("Downloaded blob to: %s", path)
 }
 
 func buildDiskTable(image imageInfo) gpt.Table {
@@ -253,7 +254,7 @@ func downloadImage(image imageInfo, targetDir string) {
 			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/"+getBlobFileName(v))
 		}
 	}
-	log.Infof("Downloaded %d blobs", len(image.layerDigest))
+	log.Infof("Downloaded %d blobs successfully", len(image.layerDigest))
 }
 
 // TODO
