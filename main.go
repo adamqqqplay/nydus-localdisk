@@ -26,7 +26,7 @@ func printWelcome() {
 	fmt.Println(str)
 }
 
-const defaultTargetDir string = "./workdir/"
+const defaultTargetDir string = "./workdir"
 
 func readCommandArgs() (imagePath string, targetDir string, err error) {
 	var args = os.Args

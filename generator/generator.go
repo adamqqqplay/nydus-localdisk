@@ -10,7 +10,6 @@ package generator
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"os"
@@ -141,6 +140,16 @@ func buildDiskTable(image imageInfo) gpt.Table {
 	return table
 }
 
+func getBlobFileName(d digest.Digest) string {
+	var str = "blob-" + d.Encoded()
+	return str
+}
+
+func getBootstrapFileName(d digest.Digest) string {
+	var str = "bootstrap-" + d.Encoded()
+	return str
+}
+
 // Round up x to a multiple of a, for example: x=6, a=4, the return value is 8
 func alignUp(x, a int64) int64 {
 	return (x + a - 1) &^ (a - 1)
@@ -186,17 +195,17 @@ func writeData(image imageInfo, targetDir string) {
 	var parts = t.GetPartitions()
 
 	var prefix = targetDir
-	for k := 0; k < len(image.layerSize); k++ {
-		var v = parts[k]
+	for k, v := range image.layerDigest {
+		var part = parts[k]
 		var filename string
 
 		if k == 0 {
-			filename = "/bootstrap"
+			filename = "/" + getBootstrapFileName(v)
 		} else {
-			filename = "/blob" + fmt.Sprint(k-1)
+			filename = "/" + getBlobFileName(v)
 		}
 
-		err = os.Truncate(prefix+filename, v.GetSize())
+		err = os.Truncate(prefix+filename, part.GetSize())
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -212,9 +221,9 @@ func writeData(image imageInfo, targetDir string) {
 			log.Fatalln(err)
 		}
 
-		written, err := v.WriteContents(file, reader)
-		if written != uint64(v.GetSize()) {
-			log.Errorf("returned %d bytes written instead of %d", written, v.GetSize())
+		written, err := part.WriteContents(file, reader)
+		if written != uint64(part.GetSize()) {
+			log.Errorf("returned %d bytes written instead of %d", written, part.GetSize())
 		}
 		if err != nil {
 			log.Errorf("returned error instead of nil")
@@ -239,9 +248,9 @@ func downloadImage(image imageInfo, targetDir string) {
 
 	for k, v := range image.layerDigest {
 		if k == 0 {
-			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/bootstrap")
+			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/"+getBootstrapFileName(v))
 		} else {
-			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/blob"+fmt.Sprint(k-1))
+			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/"+getBlobFileName(v))
 		}
 	}
 	log.Infof("Downloaded %d blobs", len(image.layerDigest))
@@ -258,7 +267,7 @@ func generateTargetDir(image imageInfo, targetDir string) string {
 		log.Fatalln(err)
 	}
 
-	var path = targetDir + reference.Path(parsed)
+	var path = targetDir + "/" + reference.Path(parsed)
 
 	return path
 }
