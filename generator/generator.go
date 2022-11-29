@@ -120,11 +120,12 @@ func buildDiskTable(image imageInfo) gpt.Table {
 	var partitionSectors int64
 	var partitionEnd int64
 	var partitionName string
+	const digestStorageLength int32 = 32
 
 	for k, size := range image.layerSize {
-		partitionSectors = size / blkSize
+		partitionSectors = int64(math.Ceil(float64(size) / float64(blkSize)))
 		partitionEnd = partitionSectors + partitionStart
-		partitionName = string(image.layerDigest[k][7 : 32+7])
+		partitionName = image.layerDigest[k].Encoded()[:digestStorageLength]
 
 		var part = gpt.Partition{Start: uint64(partitionStart), End: uint64(partitionEnd), Type: gpt.MicrosoftBasicData, Name: partitionName}
 		partitions = append(partitions, &part)
