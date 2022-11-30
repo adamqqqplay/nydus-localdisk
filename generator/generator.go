@@ -13,6 +13,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path"
 	"time"
 
 	"github.com/diskfs/go-diskfs"
@@ -142,13 +143,16 @@ func buildDiskTable(image imageInfo) gpt.Table {
 	return table
 }
 
+const blobPrefix string = "blob-"
+const bootstrapPrefix string = "bootstrap-"
+
 func getBlobFileName(d digest.Digest) string {
-	var str = "blob-" + d.Encoded()
+	var str = blobPrefix + d.Encoded()
 	return str
 }
 
 func getBootstrapFileName(d digest.Digest) string {
-	var str = "bootstrap-" + d.Encoded()
+	var str = bootstrapPrefix + d.Encoded()
 	return str
 }
 
@@ -163,7 +167,8 @@ func roundUp(value float64, nearest float64) float64 {
 
 func writeData(image imageInfo, targetDir string) {
 
-	var outputPath = targetDir + "/output.img"
+	var outputPath = path.Join(targetDir, "output.img")
+
 	log.Infof("Prepare Write datas to localdisk image file")
 
 	var inputSize = image.totalSize + int64(len(image.layerSize)+1)*1024*1024
@@ -199,20 +204,20 @@ func writeData(image imageInfo, targetDir string) {
 	var prefix = targetDir
 	for k, v := range image.layerDigest {
 		var part = parts[k]
-		var filename string
+		var fileName string
 
 		if k == 0 {
-			filename = "/" + getBootstrapFileName(v)
+			fileName = path.Join(prefix, getBootstrapFileName(v))
 		} else {
-			filename = "/" + getBlobFileName(v)
+			fileName = path.Join(prefix, getBlobFileName(v))
 		}
 
-		err = os.Truncate(prefix+filename, part.GetSize())
+		err = os.Truncate(fileName, part.GetSize())
 		if err != nil {
 			log.Fatalln(err)
 		}
 
-		f, err := os.Open(prefix + filename)
+		f, err := os.Open(fileName)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -250,9 +255,9 @@ func downloadImage(image imageInfo, targetDir string) {
 
 	for k, v := range image.layerDigest {
 		if k == 0 {
-			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/"+getBootstrapFileName(v))
+			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), path.Join(targetDir, getBootstrapFileName(v)))
 		} else {
-			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), targetDir+"/"+getBlobFileName(v))
+			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), path.Join(targetDir, getBlobFileName(v)))
 		}
 	}
 	log.Infof("Downloaded %d blobs successfully", len(image.layerDigest))
@@ -269,7 +274,7 @@ func generateTargetDir(image imageInfo, targetDir string) string {
 		log.Fatalln(err)
 	}
 
-	var path = targetDir + "/" + reference.Path(parsed)
+	var path = path.Join(targetDir, reference.Path(parsed))
 
 	return path
 }
