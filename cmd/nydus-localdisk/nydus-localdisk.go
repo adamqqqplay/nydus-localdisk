@@ -10,7 +10,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"nydus-localdisk/generator"
+	"nydus-localdisk/pkg/generator"
 	"os"
 
 	log "github.com/sirupsen/logrus"

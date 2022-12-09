@@ -281,7 +281,8 @@ func generateTargetDir(image imageInfo, targetDir string) string {
 
 func convertImage(imagePath string, workDir string) {
 	var image = getImageInfo(imagePath)
-	var targetDir = generateTargetDir(image, workDir)
+	//var targetDir = generateTargetDir(image, workDir)
+	var targetDir = workDir
 
 	downloadImage(image, targetDir)
 	writeData(image, targetDir)
