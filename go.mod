@@ -1,4 +1,4 @@
-module nydus-localdisk
+module github.com/adamqqqplay/nydus-localdisk
 
 go 1.19
 
