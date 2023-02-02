@@ -263,6 +263,11 @@ func downloadImage(image imageInfo, targetDir string) {
 	log.Infof("Downloaded %d blobs successfully", len(image.layerDigest))
 }
 
+func DownloadImage(imagePath string, targetDir string) {
+	var image = getImageInfo(imagePath)
+	downloadImage(image, targetDir)
+}
+
 // TODO
 func validateData(sourceImage string, validateImage string) {
 

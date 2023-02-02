@@ -19,7 +19,7 @@ import (
 
 func printWelcome() {
 	var str = `
-    Nydus localdisk generator v0.0.1 (golang)
+    Nydus localdisk generator (golang)
     Usage: nydus-localdisk $IMAGE_PATH $TARGET_DIR
     License: Apache-2.0
     `
