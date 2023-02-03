@@ -1,0 +1,24 @@
+{
+    "device": {
+        "backend": {
+            "type": "localdisk",
+            "config": {
+                "device_path": "/dev/loop8"
+            }
+        },
+        "cache": {
+            "type": "blobcache",
+            "config": {
+                "work_dir": "cache"
+            }
+        }
+    },
+    "mode": "direct",
+    "digest_validate": false,
+    "iostats_files": false,
+    "enable_xattr": true,
+    "fs_prefetch": {
+        "enable": true,
+        "threads_count": 4
+    }
+}
