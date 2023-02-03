@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/disk"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"github.com/docker/distribution/reference"
 	"github.com/opencontainers/go-digest"
@@ -88,7 +89,7 @@ func getImageInfo(imagePath string) imageInfo {
 	return image
 }
 
-func downloadBlob(imagePath string, hash digest.Digest, size int64, path string) {
+func downloadBlob(imagePath string, hash digest.Digest, path string) {
 	ctx := context.Background()
 	rc := regclient.New()
 	reff, err := ref.New(imagePath)
@@ -96,10 +97,11 @@ func downloadBlob(imagePath string, hash digest.Digest, size int64, path string)
 		log.Fatalln(err)
 	}
 
-	reader, err := rc.BlobGet(ctx, reff, types.Descriptor{Digest: hash, Size: size})
+	reader, err := rc.BlobGet(ctx, reff, types.Descriptor{Digest: hash})
 	if err != nil {
 		log.Fatalln(err)
 	}
+	defer reader.Close()
 	contents, err := io.ReadAll(reader)
 	if err != nil {
 		log.Fatalln(err)
@@ -145,6 +147,7 @@ func buildDiskTable(image imageInfo) gpt.Table {
 
 const blobPrefix string = "blob-"
 const bootstrapPrefix string = "bootstrap-"
+const outputImageName string = "output.img"
 
 func getBlobFileName(d digest.Digest) string {
 	var str = blobPrefix + d.Encoded()
@@ -165,9 +168,8 @@ func roundUp(value float64, nearest float64) float64 {
 	return math.Ceil(value/nearest) * nearest
 }
 
-func writeData(image imageInfo, targetDir string) {
-
-	var outputPath = path.Join(targetDir, "output.img")
+// Build disk image with GPT table
+func buildDiskImage(image imageInfo, outputPath string) *disk.Disk {
 
 	log.Infof("Prepare Write datas to localdisk image file")
 
@@ -181,7 +183,7 @@ func writeData(image imageInfo, targetDir string) {
 	log.Infof("Align input data size %d Byte to a multiple of disk sector size (512 Byte): %d Byte", inputSize, diskSize)
 
 	// create a disk image
-	var disk, err = diskfs.Create(outputPath, diskSize, diskfs.Raw)
+	var newDisk, err = diskfs.Create(outputPath, diskSize, diskfs.Raw)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -190,10 +192,16 @@ func writeData(image imageInfo, targetDir string) {
 	var table = buildDiskTable(image)
 
 	// apply the partition table
-	err = disk.Partition(&table)
+	err = newDisk.Partition(&table)
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	return newDisk
+}
+
+// Write blobs to each partitions in disk image
+func writeData(image imageInfo, disk *disk.Disk) {
 
 	t, err := disk.GetPartitionTable()
 	if err != nil {
@@ -201,15 +209,16 @@ func writeData(image imageInfo, targetDir string) {
 	}
 	var parts = t.GetPartitions()
 
-	var prefix = targetDir
+	var dir, _ = path.Split(disk.File.Name())
+
 	for k, v := range image.layerDigest {
 		var part = parts[k]
 		var fileName string
 
 		if k == 0 {
-			fileName = path.Join(prefix, getBootstrapFileName(v))
+			fileName = path.Join(dir, getBootstrapFileName(v))
 		} else {
-			fileName = path.Join(prefix, getBlobFileName(v))
+			fileName = path.Join(dir, getBlobFileName(v))
 		}
 
 		err = os.Truncate(fileName, part.GetSize())
@@ -223,12 +232,7 @@ func writeData(image imageInfo, targetDir string) {
 		}
 		reader := bufio.NewReader(f)
 
-		file, err := os.OpenFile(outputPath, os.O_CREATE|os.O_RDWR, os.ModeAppend|os.ModePerm)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		written, err := part.WriteContents(file, reader)
+		written, err := part.WriteContents(disk.File, reader)
 		if written != uint64(part.GetSize()) {
 			log.Errorf("returned %d bytes written instead of %d", written, part.GetSize())
 		}
@@ -238,34 +242,54 @@ func writeData(image imageInfo, targetDir string) {
 		}
 	}
 
-	log.Infof("Localdisk image file has been written in: %s", outputPath)
+	log.Infof("Localdisk image file has been written in: %s", disk.File.Name())
 
 }
 
-func downloadImage(image imageInfo, targetDir string) {
-	log.Infof("Download blobs in %s", targetDir)
-	var err = os.RemoveAll(targetDir)
+// Remove and make dir at path
+func prepareDir(path string) error {
+	var err = os.RemoveAll(path)
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
-	err = os.MkdirAll(targetDir, 0766)
+	err = os.MkdirAll(path, 0766)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Download Nydus image blobs from image.imagePath into targetDir, return downloaded blob paths
+func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string) {
+	log.Infof("Download blobs in %s", targetDir)
+
+	var err = prepareDir(targetDir)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	for k, v := range image.layerDigest {
-		if k == 0 {
-			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), path.Join(targetDir, getBootstrapFileName(v)))
+	for idx, hash := range image.layerDigest {
+		var targetPath string
+		if idx == 0 {
+			targetPath = path.Join(targetDir, getBootstrapFileName(hash))
 		} else {
-			downloadBlob(image.imagePath, v, int64(image.layerSize[k]), path.Join(targetDir, getBlobFileName(v)))
+			targetPath = path.Join(targetDir, getBlobFileName(hash))
 		}
+
+		downloadBlob(image.imagePath, hash, targetPath)
+		downloadedBlobs = append(downloadedBlobs, targetPath)
 	}
 	log.Infof("Downloaded %d blobs successfully", len(image.layerDigest))
+
+	return downloadedBlobs
 }
 
-func DownloadImage(imagePath string, targetDir string) {
+// Download Nydus image blobs from imagePath into targetDir, return downloaded blob paths
+func DownloadImage(imagePath string, targetDir string) (downloadedBlobs []string) {
 	var image = getImageInfo(imagePath)
-	downloadImage(image, targetDir)
+	downloadedBlobs = downloadImage(image, targetDir)
+	return downloadedBlobs
 }
 
 // TODO
@@ -273,6 +297,7 @@ func validateData(sourceImage string, validateImage string) {
 
 }
 
+// Unused function
 func generateTargetDir(image imageInfo, targetDir string) string {
 	var parsed, err = reference.ParseNormalizedNamed(image.imagePath)
 	if err != nil {
@@ -290,10 +315,12 @@ func convertImage(imagePath string, workDir string) {
 	var targetDir = workDir
 
 	downloadImage(image, targetDir)
-	writeData(image, targetDir)
-	validateData(imagePath, targetDir)
+	var disk = buildDiskImage(image, path.Join(targetDir, outputImageName))
+	writeData(image, disk)
+	validateData(imagePath, disk.File.Name())
 }
 
+// Pack Nydus image from imagePath into localdisk format at workDir/output.img
 func ConvertImage(imagePath string, workDir string) {
 	var startTime = time.Now()
 	log.Infof("Starting convert localdisk image %s", imagePath)
