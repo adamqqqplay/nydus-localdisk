@@ -10,6 +10,7 @@ package generator
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -114,7 +115,9 @@ func downloadBlob(imagePath string, hash digest.Digest, path string) {
 	log.Infof("Downloaded blob to: %s", path)
 }
 
-func buildDiskTable(image imageInfo) gpt.Table {
+// layerNum indicates the number of layers used to build the gpt partition table.
+// Nydus image have at least 2 layers, so layerNum must be >=2
+func buildDiskTable(image imageInfo, layerNum int) gpt.Table {
 	var partitions []*gpt.Partition
 	var table gpt.Table
 
@@ -126,6 +129,10 @@ func buildDiskTable(image imageInfo) gpt.Table {
 	const digestStorageLength int32 = 32
 
 	for k, size := range image.layerSize {
+		if k >= layerNum {
+			break
+		}
+
 		partitionSectors = int64(math.Ceil(float64(size) / float64(blkSize)))
 		partitionEnd = partitionSectors + partitionStart
 		partitionName = image.layerDigest[k].Encoded()[:digestStorageLength]
@@ -169,7 +176,7 @@ func roundUp(value float64, nearest float64) float64 {
 }
 
 // Build disk image with GPT table
-func buildDiskImage(image imageInfo, outputPath string) *disk.Disk {
+func buildDiskImage(image imageInfo, outputPath string, layerNum int) *disk.Disk {
 
 	log.Infof("Prepare Write datas to localdisk image file")
 
@@ -189,7 +196,7 @@ func buildDiskImage(image imageInfo, outputPath string) *disk.Disk {
 	}
 
 	// create a partition table
-	var table = buildDiskTable(image)
+	var table = buildDiskTable(image, layerNum)
 
 	// apply the partition table
 	err = newDisk.Partition(&table)
@@ -201,7 +208,7 @@ func buildDiskImage(image imageInfo, outputPath string) *disk.Disk {
 }
 
 // Write blobs to each partitions in disk image
-func writeData(image imageInfo, disk *disk.Disk) {
+func writeData(image imageInfo, disk *disk.Disk, layerNum int) {
 
 	t, err := disk.GetPartitionTable()
 	if err != nil {
@@ -212,6 +219,10 @@ func writeData(image imageInfo, disk *disk.Disk) {
 	var dir, _ = path.Split(disk.File.Name())
 
 	for k, v := range image.layerDigest {
+		if k >= layerNum {
+			break
+		}
+
 		var part = parts[k]
 		var fileName string
 
@@ -269,6 +280,8 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 		log.Fatalln(err)
 	}
 
+	var layerCount = len(image.layerDigest)
+
 	for idx, hash := range image.layerDigest {
 		var targetPath string
 		if idx == 0 {
@@ -280,7 +293,7 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 		downloadBlob(image.imagePath, hash, targetPath)
 		downloadedBlobs = append(downloadedBlobs, targetPath)
 	}
-	log.Infof("Downloaded %d blobs successfully", len(image.layerDigest))
+	log.Infof("Downloaded %d blobs successfully", layerCount)
 
 	return downloadedBlobs
 }
@@ -315,9 +328,29 @@ func convertImage(imagePath string, workDir string) {
 	var targetDir = workDir
 
 	downloadImage(image, targetDir)
-	var disk = buildDiskImage(image, path.Join(targetDir, outputImageName))
-	writeData(image, disk)
+	var layerCount = len(image.layerSize)
+	var disk = buildDiskImage(image, path.Join(targetDir, outputImageName), layerCount)
+	writeData(image, disk, layerCount)
 	validateData(imagePath, disk.File.Name())
+}
+
+func convertImageWithTemps(imagePath string, workDir string) {
+	var image = getImageInfo(imagePath)
+	var targetDir = workDir
+
+	downloadImage(image, targetDir)
+	var layerCount = len(image.layerSize)
+	var disk *disk.Disk
+	for i := 2; i < layerCount+1; i++ {
+		disk = buildDiskImage(image, path.Join(targetDir, outputImageName+".part"+fmt.Sprint(i-1)), i)
+		writeData(image, disk, i)
+	}
+
+	dir, file := path.Split(disk.File.Name())
+	err := os.Symlink(file, dir+outputImageName)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
 
 // Pack Nydus image from imagePath into localdisk format at workDir/output.img
@@ -325,7 +358,7 @@ func ConvertImage(imagePath string, workDir string) {
 	var startTime = time.Now()
 	log.Infof("Starting convert localdisk image %s", imagePath)
 
-	convertImage(imagePath, workDir)
+	convertImageWithTemps(imagePath, workDir)
 
 	var elapsedTime = float32(time.Since(startTime)/time.Millisecond) / 1000
 	log.Infof("Converted image %s successfully in %.3f s", imagePath, elapsedTime)
