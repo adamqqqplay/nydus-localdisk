@@ -70,15 +70,15 @@ func getImageInfo(imagePath string) imageInfo {
 	var layerDigest []digest.Digest
 	var layerSize []int64
 	for _, v := range layers {
-		if v.MediaType == "application/vnd.oci.image.layer.v1.tar+gzip" {
+		if v.MediaType == types.MediaTypeOCI1LayerGzip {
+			// Let the bootstrap data be saved in the front position
 			layerDigest = append([]digest.Digest{v.Digest}, layerDigest...)
 			layerSize = append([]int64{v.Size}, layerSize...)
-			totalSize += v.Size
-		} else if v.MediaType == "application/vnd.oci.image.layer.nydus.blob.v1" {
+		} else if v.MediaType == MediaTypeNydusBlob {
 			layerDigest = append(layerDigest, v.Digest)
-			layerSize = append(layerSize, int64(v.Size))
-			totalSize += int64(v.Size)
+			layerSize = append(layerSize, v.Size)
 		}
+		totalSize += v.Size
 	}
 
 	var image = imageInfo{
@@ -167,10 +167,6 @@ func buildDiskTable(image imageInfo, layerNum int) gpt.Table {
 
 	return table
 }
-
-const blobPrefix string = "blob-"
-const bootstrapPrefix string = "bootstrap-"
-const outputImageName string = "output.img"
 
 func getBlobFileName(d digest.Digest) string {
 	var str = blobPrefix + d.Encoded()
