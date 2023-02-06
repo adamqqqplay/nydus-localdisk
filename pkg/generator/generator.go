@@ -11,10 +11,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"os"
-	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -24,111 +23,27 @@ import (
 	"github.com/docker/distribution/reference"
 	"github.com/opencontainers/go-digest"
 	"github.com/regclient/regclient"
-	"github.com/regclient/regclient/types"
-	"github.com/regclient/regclient/types/manifest"
 	"github.com/regclient/regclient/types/ref"
 	log "github.com/sirupsen/logrus"
 )
 
-type imageInfo struct {
-	imagePath   string
-	imageParser manifest.Imager
-	layerDigest []digest.Digest
-	layerSize   []int64
-	totalSize   int64
+// Round up x to a multiple of a, for example: x=6, a=4, the return value is 8
+func alignUp(x, a int64) int64 {
+	return (x + a - 1) &^ (a - 1)
 }
 
-func getImageParser(imagePath string) manifest.Imager {
-	var ctx = context.Background()
-	var reference, err = ref.New(imagePath)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	var client = regclient.New()
-	defer client.Close(ctx, reference)
-
-	mani, err := client.ManifestGet(ctx, reference)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	imager, ok := mani.(manifest.Imager)
-	if !ok {
-		log.Fatalln("manifest must be an image")
-	}
-	return imager
+func roundUp(value float64, nearest float64) float64 {
+	return math.Ceil(value/nearest) * nearest
 }
 
-func getImageInfo(imagePath string) imageInfo {
-	var imageParser = getImageParser(imagePath)
-
-	layers, err := imageParser.GetLayers()
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	var totalSize int64 = 0
-	var layerDigest []digest.Digest
-	var layerSize []int64
-	for _, v := range layers {
-		if v.MediaType == types.MediaTypeOCI1LayerGzip {
-			// Let the bootstrap data be saved in the front position
-			layerDigest = append([]digest.Digest{v.Digest}, layerDigest...)
-			layerSize = append([]int64{v.Size}, layerSize...)
-		} else if v.MediaType == MediaTypeNydusBlob {
-			layerDigest = append(layerDigest, v.Digest)
-			layerSize = append(layerSize, v.Size)
-		}
-		totalSize += v.Size
-	}
-
-	var image = imageInfo{
-		imagePath,
-		imageParser,
-		layerDigest,
-		layerSize,
-		totalSize,
-	}
-
-	return image
+func getBlobFileName(d digest.Digest) string {
+	var str = blobPrefix + d.Encoded()
+	return str
 }
 
-func downloadBlobByRef(client regclient.RegClient, imageRef ref.Ref, hash digest.Digest, path string) {
-	var ctx = context.Background()
-	blob, err := client.BlobGet(ctx, imageRef, types.Descriptor{Digest: hash})
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer blob.Close()
-
-	newBlob, err := os.Create(path)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer newBlob.Close()
-
-	bufSize := 1024 * 1024 // 1MB buffer
-	in := bufio.NewReaderSize(blob, bufSize)
-	out := bufio.NewWriterSize(newBlob, bufSize)
-	written, err := io.Copy(out, in)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	out.Flush()
-
-	log.Infof("Downloaded blob to: %s (%d Bytes)", path, written)
-}
-
-// reserved for compatibility
-func downloadBlob(imagePath string, hash digest.Digest, path string) {
-	var ctx = context.Background()
-	var reference, err = ref.New(imagePath)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	var client = regclient.New()
-	defer client.Close(ctx, reference)
-
-	downloadBlobByRef(*client, reference, hash, path)
+func getBootstrapFileName(d digest.Digest) string {
+	var str = bootstrapPrefix + d.Encoded()
+	return str
 }
 
 // layerNum indicates the number of layers used to build the gpt partition table.
@@ -166,25 +81,6 @@ func buildDiskTable(image imageInfo, layerNum int) gpt.Table {
 	}
 
 	return table
-}
-
-func getBlobFileName(d digest.Digest) string {
-	var str = blobPrefix + d.Encoded()
-	return str
-}
-
-func getBootstrapFileName(d digest.Digest) string {
-	var str = bootstrapPrefix + d.Encoded()
-	return str
-}
-
-// Round up x to a multiple of a, for example: x=6, a=4, the return value is 8
-func alignUp(x, a int64) int64 {
-	return (x + a - 1) &^ (a - 1)
-}
-
-func roundUp(value float64, nearest float64) float64 {
-	return math.Ceil(value/nearest) * nearest
 }
 
 // Build disk image with GPT table
@@ -228,7 +124,7 @@ func writeData(image imageInfo, disk *disk.Disk, layerNum int) {
 	}
 	var parts = t.GetPartitions()
 
-	var dir, _ = path.Split(disk.File.Name())
+	var dir, _ = filepath.Split(disk.File.Name())
 
 	for k, v := range image.layerDigest {
 		if k >= layerNum {
@@ -239,9 +135,9 @@ func writeData(image imageInfo, disk *disk.Disk, layerNum int) {
 		var fileName string
 
 		if k == 0 {
-			fileName = path.Join(dir, getBootstrapFileName(v))
+			fileName = filepath.Join(dir, getBootstrapFileName(v))
 		} else {
-			fileName = path.Join(dir, getBlobFileName(v))
+			fileName = filepath.Join(dir, getBlobFileName(v))
 		}
 
 		err = os.Truncate(fileName, part.GetSize())
@@ -308,9 +204,9 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 	for idx, hash := range image.layerDigest {
 		var targetPath string
 		if idx == 0 {
-			targetPath = path.Join(targetDir, getBootstrapFileName(hash))
+			targetPath = filepath.Join(targetDir, getBootstrapFileName(hash))
 		} else {
-			targetPath = path.Join(targetDir, getBlobFileName(hash))
+			targetPath = filepath.Join(targetDir, getBlobFileName(hash))
 		}
 
 		go func(hash digest.Digest) {
@@ -348,7 +244,7 @@ func generateTargetDir(image imageInfo, targetDir string) string {
 		log.Fatalln(err)
 	}
 
-	var path = path.Join(targetDir, reference.Path(parsed))
+	var path = filepath.Join(targetDir, reference.Path(parsed))
 
 	return path
 }
@@ -360,7 +256,7 @@ func convertImage(imagePath string, workDir string) {
 
 	downloadImage(image, targetDir)
 	var layerCount = len(image.layerSize)
-	var disk = buildDiskImage(image, path.Join(targetDir, outputImageName), layerCount)
+	var disk = buildDiskImage(image, filepath.Join(targetDir, outputImageName), layerCount)
 	writeData(image, disk, layerCount)
 	validateData(imagePath, disk.File.Name())
 }
@@ -373,11 +269,11 @@ func convertImageWithTemps(imagePath string, workDir string) {
 	var layerCount = len(image.layerSize)
 	var disk *disk.Disk
 	for i := 2; i < layerCount+1; i++ {
-		disk = buildDiskImage(image, path.Join(targetDir, outputImageName+".part"+fmt.Sprint(i-1)), i)
+		disk = buildDiskImage(image, filepath.Join(targetDir, outputImageName+".part"+fmt.Sprint(i-1)), i)
 		writeData(image, disk, i)
 	}
 
-	dir, file := path.Split(disk.File.Name())
+	dir, file := filepath.Split(disk.File.Name())
 	err := os.Symlink(file, dir+outputImageName)
 	if err != nil {
 		log.Fatalln(err)
