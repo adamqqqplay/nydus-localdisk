@@ -40,21 +40,22 @@ type imageInfo struct {
 
 func getImageParser(imagePath string) manifest.Imager {
 	var ctx = context.Background()
-	var client = regclient.New()
 	var reference, err = ref.New(imagePath)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	var client = regclient.New()
+	defer client.Close(ctx, reference)
 
 	mani, err := client.ManifestGet(ctx, reference)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	img, ok := mani.(manifest.Imager)
+	imager, ok := mani.(manifest.Imager)
 	if !ok {
 		log.Fatalln("manifest must be an image")
 	}
-	return img
+	return imager
 }
 
 func getImageInfo(imagePath string) imageInfo {
@@ -91,16 +92,9 @@ func getImageInfo(imagePath string) imageInfo {
 	return image
 }
 
-func downloadBlob(imagePath string, hash digest.Digest, path string) {
+func downloadBlobByRef(client regclient.RegClient, imageRef ref.Ref, hash digest.Digest, path string) {
 	var ctx = context.Background()
-	var reference, err = ref.New(imagePath)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	var client = regclient.New()
-	defer client.Close(ctx, reference)
-
-	blob, err := client.BlobGet(ctx, reference, types.Descriptor{Digest: hash})
+	blob, err := client.BlobGet(ctx, imageRef, types.Descriptor{Digest: hash})
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -122,6 +116,19 @@ func downloadBlob(imagePath string, hash digest.Digest, path string) {
 	out.Flush()
 
 	log.Infof("Downloaded blob to: %s (%d Bytes)", path, written)
+}
+
+// reserved for compatibility
+func downloadBlob(imagePath string, hash digest.Digest, path string) {
+	var ctx = context.Background()
+	var reference, err = ref.New(imagePath)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	var client = regclient.New()
+	defer client.Close(ctx, reference)
+
+	downloadBlobByRef(*client, reference, hash, path)
 }
 
 // layerNum indicates the number of layers used to build the gpt partition table.
@@ -292,6 +299,14 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 
 	var layerCount = len(image.layerDigest)
 
+	var ctx = context.Background()
+	imageRef, err := ref.New(image.imagePath)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	var client = regclient.New()
+	defer client.Close(ctx, imageRef)
+
 	var wg sync.WaitGroup
 	wg.Add(layerCount)
 	for idx, hash := range image.layerDigest {
@@ -303,7 +318,8 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 		}
 
 		go func(hash digest.Digest) {
-			downloadBlob(image.imagePath, hash, targetPath)
+			//downloadBlob(image.imagePath, hash, targetPath)
+			downloadBlobByRef(*client, imageRef, hash, targetPath)
 			wg.Done()
 		}(hash)
 
