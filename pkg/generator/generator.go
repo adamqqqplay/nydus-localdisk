@@ -105,16 +105,23 @@ func downloadBlob(imagePath string, hash digest.Digest, path string) {
 		log.Fatalln(err)
 	}
 	defer blob.Close()
-	contents, err := io.ReadAll(blob)
-	if err != nil {
-		log.Fatalln(err)
-	}
 
-	err = os.WriteFile(path, contents, 0666)
+	newBlob, err := os.Create(path)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	log.Infof("Downloaded blob to: %s (%d Bytes)", path, len(contents))
+	defer newBlob.Close()
+
+	bufSize := 1024 * 1024 // 1MB buffer
+	in := bufio.NewReaderSize(blob, bufSize)
+	out := bufio.NewWriterSize(newBlob, bufSize)
+	written, err := io.Copy(out, in)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	out.Flush()
+
+	log.Infof("Downloaded blob to: %s (%d Bytes)", path, written)
 }
 
 // layerNum indicates the number of layers used to build the gpt partition table.
