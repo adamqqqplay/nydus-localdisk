@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/diskfs/go-diskfs"
@@ -91,19 +92,20 @@ func getImageInfo(imagePath string) imageInfo {
 }
 
 func downloadBlob(imagePath string, hash digest.Digest, path string) {
-	ctx := context.Background()
-	rc := regclient.New()
-	reff, err := ref.New(imagePath)
+	var ctx = context.Background()
+	var reference, err = ref.New(imagePath)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	var client = regclient.New()
+	defer client.Close(ctx, reference)
 
-	reader, err := rc.BlobGet(ctx, reff, types.Descriptor{Digest: hash})
+	blob, err := client.BlobGet(ctx, reference, types.Descriptor{Digest: hash})
 	if err != nil {
 		log.Fatalln(err)
 	}
-	defer reader.Close()
-	contents, err := io.ReadAll(reader)
+	defer blob.Close()
+	contents, err := io.ReadAll(blob)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -112,7 +114,7 @@ func downloadBlob(imagePath string, hash digest.Digest, path string) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	log.Infof("Downloaded blob to: %s", path)
+	log.Infof("Downloaded blob to: %s (%d Bytes)", path, len(contents))
 }
 
 // layerNum indicates the number of layers used to build the gpt partition table.
@@ -273,6 +275,7 @@ func prepareDir(path string) error {
 
 // Download Nydus image blobs from image.imagePath into targetDir, return downloaded blob paths
 func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string) {
+	var startTime = time.Now()
 	log.Infof("Download blobs in %s", targetDir)
 
 	var err = prepareDir(targetDir)
@@ -282,6 +285,8 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 
 	var layerCount = len(image.layerDigest)
 
+	var wg sync.WaitGroup
+	wg.Add(layerCount)
 	for idx, hash := range image.layerDigest {
 		var targetPath string
 		if idx == 0 {
@@ -290,10 +295,16 @@ func downloadImage(image imageInfo, targetDir string) (downloadedBlobs []string)
 			targetPath = path.Join(targetDir, getBlobFileName(hash))
 		}
 
-		downloadBlob(image.imagePath, hash, targetPath)
+		go func(hash digest.Digest) {
+			downloadBlob(image.imagePath, hash, targetPath)
+			wg.Done()
+		}(hash)
+
 		downloadedBlobs = append(downloadedBlobs, targetPath)
 	}
-	log.Infof("Downloaded %d blobs successfully", layerCount)
+	wg.Wait()
+	var elapsedTime = float32(time.Since(startTime)/time.Millisecond) / 1000
+	log.Infof("Downloaded %d blobs successfully in %.3f s", layerCount, elapsedTime)
 
 	return downloadedBlobs
 }
