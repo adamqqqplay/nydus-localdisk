@@ -64,5 +64,5 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	generator.ConvertImage(imagePath, workDir)
+	generator.ConvertImage(imagePath, workDir, false)
 }
