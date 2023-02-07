@@ -15,4 +15,6 @@ const (
 	blobPrefix      = "blob-"
 	bootstrapPrefix = "bootstrap-"
 	outputImageName = "output.img"
+
+	localdiskBlobIdLen int = 32
 )

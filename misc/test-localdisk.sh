@@ -79,7 +79,8 @@ function startNydusd() {
 
     WK_DIR=$(pwd)
     mkdir ./mnt
-
+    
+    sudo rm -rf ./cache
     sudo ./nydusd \
         --config /etc/nydusd-localdisk.json \
         --mountpoint "$WK_DIR"/mnt \

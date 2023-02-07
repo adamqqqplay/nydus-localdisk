@@ -56,8 +56,6 @@ func buildDiskTable(image imageInfo, layerNum int) gpt.Table {
 	var partitionStart int64 = 2048
 	var partitionSectors int64
 	var partitionEnd int64
-	var partitionName string
-	const digestStorageLength int32 = 32
 
 	for k, size := range image.layerSize {
 		if k >= layerNum {
@@ -66,19 +64,21 @@ func buildDiskTable(image imageInfo, layerNum int) gpt.Table {
 
 		partitionSectors = int64(math.Ceil(float64(size) / float64(blkSize)))
 		partitionEnd = partitionSectors + partitionStart
-		partitionName = image.layerDigest[k].Encoded()[:digestStorageLength]
+		partitionName, partitionGUID := splitBlobid(image.layerDigest[k].Encoded()) // The 64-byte layer digest (blob id) is stored in two parts
 
-		var part = gpt.Partition{Start: uint64(partitionStart), End: uint64(partitionEnd), Type: gpt.MicrosoftBasicData, Name: partitionName}
+		var part = gpt.Partition{Start: uint64(partitionStart), End: uint64(partitionEnd), Type: gpt.LinuxFilesystem, Name: partitionName, GUID: partitionGUID}
 		partitions = append(partitions, &part)
 
 		partitionStart = (partitionEnd + 2048) / 2048 * 2048
 	}
 
-	log.Infof("Build GPT table with %d layers", len(partitions))
+	var imageDigest = image.imageManifest.GetDescriptor().Digest
 	table = gpt.Table{
 		Partitions:    partitions,
+		GUID:          truncateBlobid(imageDigest.Encoded()),
 		ProtectiveMBR: true,
 	}
+	log.Infof("Build GPT table with %d layers", len(partitions))
 
 	return table
 }

@@ -19,6 +19,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func splitBlobid(blobid string) (string, string) {
+	if len(blobid) >= localdiskBlobIdLen {
+		return blobid[:localdiskBlobIdLen], blobid[localdiskBlobIdLen:]
+	}
+
+	return blobid, blobid
+}
+
+func truncateBlobid(blobid string) string {
+	if len(blobid) >= localdiskBlobIdLen {
+		var newBlobid = blobid[:localdiskBlobIdLen]
+		return newBlobid
+	}
+
+	return blobid
+}
+
 func downloadBlobByRef(client regclient.RegClient, imageRef ref.Ref, hash digest.Digest, path string) {
 	var ctx = context.Background()
 	blob, err := client.BlobGet(ctx, imageRef, types.Descriptor{Digest: hash})
