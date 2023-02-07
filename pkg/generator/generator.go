@@ -281,11 +281,15 @@ func convertImageWithTemps(imagePath string, workDir string) {
 }
 
 // Pack Nydus image from imagePath into localdisk format at workDir/output.img
-func ConvertImage(imagePath string, workDir string) {
+func ConvertImage(imagePath string, workDir string, withTemps bool) {
 	var startTime = time.Now()
 	log.Infof("Starting convert localdisk image %s", imagePath)
 
-	convertImageWithTemps(imagePath, workDir)
+	if withTemps {
+		convertImageWithTemps(imagePath, workDir)
+	} else {
+		convertImage(imagePath, workDir)
+	}
 
 	var elapsedTime = float32(time.Since(startTime)/time.Millisecond) / 1000
 	log.Infof("Converted image %s successfully in %.3f s", imagePath, elapsedTime)
