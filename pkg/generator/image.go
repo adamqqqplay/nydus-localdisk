@@ -18,14 +18,14 @@ import (
 )
 
 type imageInfo struct {
-	imagePath   string
-	imageParser manifest.Imager
-	layerDigest []digest.Digest
-	layerSize   []int64
-	totalSize   int64
+	imagePath     string
+	imageManifest manifest.Manifest
+	layerDigest   []digest.Digest
+	layerSize     []int64
+	totalSize     int64
 }
 
-func getImageParser(imagePath string) manifest.Imager {
+func getImageManifest(imagePath string) manifest.Manifest {
 	var ctx = context.Background()
 	var reference, err = ref.New(imagePath)
 	if err != nil {
@@ -38,15 +38,16 @@ func getImageParser(imagePath string) manifest.Imager {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	imager, ok := mani.(manifest.Imager)
-	if !ok {
-		log.Fatalln("manifest must be an image")
-	}
-	return imager
+	return mani
 }
 
 func getImageInfo(imagePath string) imageInfo {
-	var imageParser = getImageParser(imagePath)
+	var imageManifest = getImageManifest(imagePath)
+
+	imageParser, ok := imageManifest.(manifest.Imager)
+	if !ok {
+		log.Fatalln("manifest must be an image")
+	}
 
 	layers, err := imageParser.GetLayers()
 	if err != nil {
@@ -70,7 +71,7 @@ func getImageInfo(imagePath string) imageInfo {
 
 	var image = imageInfo{
 		imagePath,
-		imageParser,
+		imageManifest,
 		layerDigest,
 		layerSize,
 		totalSize,
