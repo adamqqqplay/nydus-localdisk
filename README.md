@@ -16,7 +16,7 @@ go build
 Nydus localdisk generator converts a Nydus image from the source registry to a gpt disk image file in localdisk format. 
 
 ```
-./nydus-localdisk $IMAGE_PATH $TARGET_DIR
+./nydus-localdisk convert --source $SOURCE --target $TARGET
 ```
 
 If you only have an OCI image, you can use [Nydusify](https://github.com/dragonflyoss/image-service/blob/master/docs/nydusify.md) to convert it to a Nydus image first, and then use this tool to generate a Nydus localdisk image file.
@@ -54,8 +54,8 @@ cp ./target/release/nydus* ~/nydus-localdisk/
 cd ~/nydus-localdisk/
 sudo nerdctl run -d --restart=always -p 5000:5000 registry
 sudo nydusify convert --fs-version 6 --source ubuntu --target localhost:5000/ubuntu:nydus-v6
-sudo ./nydus-localdisk localhost:5000/ubuntu:nydus-v6 ./ubuntu-v6.img
-./misc/test-localdisk.sh ./ubuntu-v6.img
+sudo ./nydus-localdisk convert --source localhost:5000/ubuntu:nydus-v6 --target ./ubuntu
+./misc/test-localdisk.sh ./ubuntu/output.img
 ```
 
 If you see output like this, it means the test was successful.
