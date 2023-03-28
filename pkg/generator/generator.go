@@ -10,7 +10,10 @@ package generator
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -231,9 +234,67 @@ func DownloadImage(imagePath string, targetDir string) (downloadedBlobs []string
 	return downloadedBlobs
 }
 
-// TODO
-func validateData(sourceImage string, validateImage string) {
+// Validate that the target image is consistent with the source image
+func validateData(sourceImage string, targetImage string, layerNum int, downloadedBlobs []string) {
+	var startTime = time.Now()
+	log.Infof("Validating image %s in %s", sourceImage, targetImage)
 
+	var disk, err = diskfs.Open(targetImage)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	t, err := disk.GetPartitionTable()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// Validate each partition in the target image
+	var errorCount = 0
+	var parts = t.GetPartitions()
+	for index, part := range parts {
+		if index >= layerNum {
+			break
+		}
+
+		// Compute the sha256 in the target image
+		var targetHash = sha256.New()
+		readLen, err := part.ReadContents(disk.File, targetHash)
+		if readLen != int64(part.GetSize()) {
+			log.Errorf("returned %d bytes written instead of %d", readLen, part.GetSize())
+		}
+		if err != nil {
+			log.Errorf("returned error instead of nil")
+			log.Fatalln(err)
+		}
+		var targetHashString = hex.EncodeToString(targetHash.Sum(nil))
+
+		// Compute the sha256 in the source image
+		blob, err := os.Open(downloadedBlobs[index])
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer blob.Close()
+		var sourceHash = sha256.New()
+		if _, err := io.Copy(sourceHash, blob); err != nil {
+			log.Fatal(err)
+		}
+		var sourceHashString = hex.EncodeToString(sourceHash.Sum(nil))
+
+		if targetHashString == sourceHashString {
+			log.Infof("The data in partition %d is correct, sha256: %s", index, targetHashString)
+		} else {
+			errorCount++
+			log.Errorf("Data corrupted in partition %d, sha256: %s not equal %s", index, targetHashString, sourceHashString)
+		}
+	}
+
+	if errorCount > 0 {
+		log.Fatalf("The generated target image is corrupted with %d part, please try convert again", errorCount)
+	}
+
+	var elapsedTime = float32(time.Since(startTime)/time.Millisecond) / 1000
+	log.Infof("Image validated in %.3f s", elapsedTime)
 }
 
 // Unused function
@@ -253,11 +314,11 @@ func convertImage(imagePath string, workDir string) {
 	//var targetDir = generateTargetDir(image, workDir)
 	var targetDir = workDir
 
-	downloadImage(image, targetDir)
+	var downloadedBlobs = downloadImage(image, targetDir)
 	var layerCount = len(image.layerSize)
 	var disk = buildDiskImage(image, filepath.Join(targetDir, outputImageName), layerCount)
 	writeData(image, disk, layerCount)
-	validateData(imagePath, disk.File.Name())
+	validateData(imagePath, disk.File.Name(), layerCount, downloadedBlobs)
 }
 
 func convertImageWithTemps(imagePath string, workDir string) {
