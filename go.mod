@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/diskfs/go-diskfs v1.2.0
-	github.com/docker/distribution v2.8.1+incompatible
+	github.com/docker/distribution v2.8.2+incompatible
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/regclient/regclient v0.4.7
 	github.com/sirupsen/logrus v1.9.0
